@@ -1,0 +1,86 @@
+
+from NEC_tools import *
+import re
+import matplotlib.pyplot as plt
+import pandas as pd
+
+def update_nec_input(k_value):
+    """Aggiorna il file di input NEC2 con il valore di k."""
+    input_file_path = r"C:\Users\maisa\Documents\GitHub\Antenna_optimizer\inp\Dual_band_yagi_73_opt.nec"
+    
+    # Modifica la sezione di input che contiene il parametro k
+    with open(input_file_path, "r") as file:
+        lines = file.readlines()
+
+    with open(input_file_path, "w") as file:
+        for line in lines:
+            # Sostituisce il parametro k nelle righe che lo contengono
+            if "k" in line:
+                # Sostituisce la parte di stringa con il nuovo valore di k
+                line = re.sub(r'k=([-+]?\d*\.\d+|\d+)', f'k={k_value}', line)
+            file.write(line)
+    
+
+def main():
+    k_values = [round(k, 2) for k in frange(-2, 2, 0.1)]  # Genera i valori di k
+    results = []
+
+    # Esegui la simulazione per ogni valore di k
+    for k in k_values:
+        print(f"Eseguendo simulazione per k={k}...")
+        update_nec_input(k)  # Aggiorna il file di input con il nuovo k
+        nec_file_path=r"C:\Users\maisa\Documents\GitHub\Antenna_optimizer\inp\Dual_band_yagi_73_opt.nec"
+        inp_file_path=r"C:\Users\maisa\Documents\GitHub\Antenna_optimizer\inp\Dual_band_yagi_73_opt.inp"
+        convert_nec_to_inp(nec_file_path,inp_file_path,k)
+        
+        # Esegui NEC2
+        stdout, stderr = run_nec2dxs1k5()
+        
+        # Leggi i risultati da un file di output (assumendo che il file sia generato da NEC2)
+        real_imp, imag_imp, max_gain = read_nec_output(r"C:\Users\maisa\Documents\GitHub\Antenna_optimizer\out\Dual_band_yagi_73_opt.out")  
+        results.append({
+            'k': k,
+            'real_impedance': real_imp,
+            'imag_impedance': imag_imp,
+            'max_gain_db': max_gain
+        })
+    
+    # Converto i risultati in un DataFrame per la gestione dei dati
+    df = pd.DataFrame(results)
+    
+    # Stampa la tabella dei risultati
+    print(df)
+
+    # Grafico impedenza reale vs k
+    plt.figure()
+    plt.plot(df['k'], df['real_impedance'], label='Impedanza (Parte Reale)')
+    plt.plot(df['k'], df['imag_impedance'], label='Impedenza (Parte Immaginaria)', color='r', linestyle='--')  # Linea rossa tratteggiata
+    plt.xlabel('k')
+    plt.ylabel('Impedenza (Ohm)')
+    plt.title('Impedenza vs k')
+    plt.grid(True)
+    plt.legend()
+
+
+    # Grafico guadagno massimo vs k
+    plt.figure()
+    plt.plot(df['k'], df['max_gain_db'], label='Guadagno massimo (dB)', color='orange')
+    plt.xlabel('k')
+    plt.ylabel('Guadagno massimo (dB)')
+    plt.title('Guadagno massimo vs k')
+    plt.grid(True)
+    plt.legend()
+
+    # Mostra i grafici
+    plt.show()
+
+def frange(start, stop, step):
+    """Genera una sequenza di numeri decimali con un dato passo."""
+    while start <= stop:
+        yield round(start, 2)  # Arrotonda al secondo decimale
+        start += step
+
+if __name__ == "__main__":
+    main()
+
+
