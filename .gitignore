@@ -1,0 +1,14 @@
+# Escludi directory e file di cache
+__pycache__/
+*.pyc
+*.pyo
+*.cache
+
+# Escludi file eseguibili
+*.exe
+
+# Escludi file temporanei
+*.tmp
+
+# Escludi file CSV
+*.csv

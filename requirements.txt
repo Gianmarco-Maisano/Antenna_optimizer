@@ -1,0 +1,4 @@
+deap
+pandas
+matplotlib
+PySide6.QtWidgets
