@@ -12,3 +12,6 @@ __pycache__/
 
 # Escludi file CSV
 *.csv
+
+# NEC2++ build output
+third_party/necpp/build/

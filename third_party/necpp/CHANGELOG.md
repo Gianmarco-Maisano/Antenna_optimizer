@@ -1,0 +1,470 @@
+## Version 2.3.4
+
+### Breaking Changes
+* **`get_impedance_real/imag` now accept `feed_index`:** Previously returned `imp.back()` (the *last* feed's impedance), which depended on EX card ordering and was unpredictable for multi-feed setups. Now returns `imp[feed_index]` with `feed_index` defaulting to 0 (first feed). Single-feed simulations are unaffected (`imp[0] == imp.back()`). Out-of-range indices return the sentinel value `-999.0`. New C API functions `nec_impedance_real_indexed()` and `nec_impedance_imag_indexed()` provide explicit indexed access. Doxygen documentation added to `nec_context.h` and the main page.
+
+### Tests
+* GX symmetry unit tests now validate exact impedance values for both multi-feed indexed access and single-feed
+
+## Version 2.3.3
+
+### Bug Fixes
+* **GX plane symmetry (three defects fixed):** Structures using the `GX` card produced `INF` impedance, wrong currents, or unstable results due to three independent bugs (#124, @KJ7LNW):
+  - **`solves()` scratch slot:** The forward/backward mode transform read `scm[0]` before anything wrote it, hitting garbage on wire-only decks (masked on wire+patch by a bulk fill).
+  - **`fblock()` guard inverted:** Legal section counts (2, 4, 8) returned early leaving the coefficient table unpopulated; pass count was `nop/2` instead of `log2(nop)`, diverging at 8 sections.
+  - **Three-plane reflection missing copies:** Copy loop handled only 3 of 8 copies; copies 4-7 were written unreflected and the X plane was left out of the tag increment.
+  Cross-validated against `nec2c`, `nec2dx`, `nec2dxs`, and `xnec2c` over 1219 decks (46M points).
+
+### Tests
+* GX one-plane symmetry: finite impedance verification
+* GX three-plane symmetry: impedance matches control deck (13.7 Ω)
+* Regression inputs: `gx_one_plane.nec`, `gx_three_planes.nec`, `gx_three_planes_control.nec`
+
+## Version 2.3.2
+
+### Bug Fixes
+* **NE/NH cards: blank count parameters now default to 1 (NEC-2 Part 3).** The ANTLR grammar's `INT?` fields for NRX/NRY/NRZ produced 0 when left blank, causing `nfpat()` to be silently skipped (zero near-field output). The fix in `ne_nh_card()` bumps zero counts to 1 for both the ANTLR and legacy parse paths. A user supplying blank counts in a `.nec` file (e.g. `NE 0  100 100 0` with missing I2/I3/I4) will now correctly get a 1×1×1 grid instead of no output. PyNEC callers were unaffected because its Python bindings require explicit values for all 10 parameters.
+* **c_plot_card double-close:** Raw `FILE*` shared across copied plot cards caused duplicate `fclose()` on teardown. Replaced with `std::shared_ptr<FILE>` using `fclose` as the custom deleter (#123, @KJ7LNW).
+* **Average-only radiation pattern uninitialized read:** When `RP A=2` (average only), per-angle arrays are intentionally unpopulated, but the report loop read an uninitialized polarization index. Guarded with a named constant (#123, @KJ7LNW).
+
+### Tests
+* NE/NH near-field unit tests: explicit counts, multiple-point grid, blank-counts default-to-1, electric and magnetic field retrieval
+* Regression inputs: `near_field_electric.nec`, `near_field_magnetic.nec`
+
+## Version 2.3.1
+
+### Bug Fixes
+* **Shared library not found after install:** On Linux, `cmake --install` now runs `ldconfig` to refresh the dynamic linker cache.
+
+### Features
+* **int64_t segment/patch counts:** Upgraded `n_segments`, `np`, `m`, `mp`, and related loop counters and buffer sizes from `int` to `int64_t` throughout `c_geometry.hpp`, `c_geometry.cpp`, and `nec_context`.
+  This removes the ~2.1-billion segment/patch ceiling inherited from the Fortran era, enabling simulations at much larger scale.
+  Benchmark score is unchanged; all 47 test cases (530 assertions) continue to pass.
+
+### Bug Fixes
+* **GH card flat spiral (HL=0):** Fixed inherited Fortran bug where a flat-spiral helix degenerated into a straight radial wire. A dedicated `HL=0` branch now advances rotation by segment angle and interpolates radius linearly, matching the independent `xnec2c` implementation (#122, @KJ7LNW)
+
+### Tests
+* Unit test for `c_geometry::helix()` HL=0 flat-spiral path — verifies all-z-zero, correct tags/radii, non-degenerate spiral geometry, and final-radius interpolation
+* Regression input (`testharness/data/gh_flat_spiral.nec`) exercising the GH HL=0 flat-spiral code path
+* Removed stale `[surface_patch]` Catch2 tag exclusion — the underlying bug was fixed in #120; all 47 test cases now pass (530 assertions)
+
+### Documentation
+* Updated `README.md` with Catch2/CTest instructions
+* Rewrote `testharness/README.md` for the CMake build system
+* Fixed `example/README.md` to use direct g++ commands instead of the removed Makefile targets
+
+## Version 2.2.1
+
+### Bug Fixes
+* Over-length input lines in `load_line` are now drained instead of truncating silently, with regression coverage
+
+## Version 2.2.0
+
+### Modernization
+* All `fprintf(stderr, ...)` replaced with `std::cerr` (misc.cpp, nec2cpp.cpp, nec_output.cpp)
+* `#ifndef _WIN32` guards broadened to `#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)` for signal handlers
+* `secnds()` gets an `__EMSCRIPTEN__` stub returning 0.0 (no process-timing syscalls in WASM)
+* WASM build target (`make wasm`) using Emscripten with `src/nec_wasm.cpp` C-API wrapper
+  * Exports: `nec_create_context`, `nec_delete_context`, `nec_process_input`, `nec_get_output`, `nec_get_output_length`
+
+## Version 2.1.1
+
+### Breaking Changes
+* **Eigen is now mandatory** (but bundled in `src/eigen3/` — no external install needed). All `--with-eigen*` options removed.
+* **LAPACK support removed**. `--with-lapack` option removed. Eigen's PartialPivLU replaces it.
+* **nec_3vector is now Eigen::Matrix<nec_float,3,1>**. The hand-written class removed.
+  `.x()`/`.y()`/`.z()` replaced by `operator()(0)/(1)/(2)` throughout.
+* **safe_array backed by Eigen::Matrix**. Raw new[]/delete[] replaced by Eigen for SIMD ops.
+* pkg-config no longer links lapack/blas.
+
+### New Features
+* LU decomposition uses Eigen::PartialPivLU (blocked, SIMD-accelerated)
+* Eigen::Map used for in-place zero-copy factorization
+* `set_intersection_check(bool)` API to bypass O(n²) segment intersection checks (#63)
+* `squaredNorm()` and `cross()` aliases on 3-vector for Eigen API compatibility
+* Table-driven NEC card parser: `nec_card_parser.h` with clean `parse_nec_card()` replacing the FORTRAN-style `readmn()` C-string parser. Adding a card now touches one place (handler table) instead of three.
+
+### Bug Fixes
+* Fix safe_array const operator[] infinite recursion
+* Fix Eigen LU pivot format: solve_eigen now applies P*b permutation directly
+* Fix Eigen::Map stride with OuterStride<>(ndim) for padded matrices
+* Fix helix validation: segment_count < 1 throws instead of silent return (#48)
+* Fix pkg-config hardcoded -llapack -lblas (#76)
+* Fix K5332187.nec test data typos (#77)
+* Fix missing #include <vector> in nec_wire.h
+* Fix false positive intersection errors for connected wires (#87)
+* Fix left-handed helix start point (#91)
+* Fix average gain computation: 1-based to 0-based index error in integration boundary checks (#72, PR #73)
+* Fix segfault in connect_segments: bounds check tightened from PCHCON to n_segments (#35)
+* Fix memory allocator doubling (2x→1.5x growth) to reduce peak memory for large models (#29)
+* Fix unreachable code in solves(): `k==nop` corrected to `k==(nop-1)` (#49)
+* Merge redundant read+sum loops in solves() (#50)
+* Fix missing `segment::diff()` method in CurrentInput.h for macOS/Xcode builds (#86)
+* Add explicit `nec2___DEPENDENCIES` in Makefile.am to fix autotools link order (#70)
+* Add `#include <cctype>` in misc.cpp for MSVC compatibility (#51)
+* Add single-quote (`'`) inline comment support for 4nec2 compatible NEC cards (#28)
+* Remove `-all-static` from LDFLAGS for macOS compatibility (#58)
+* Remove LAPACK/Atlas configure options and references (#66, #62, #57, #52, #18, #83, #68)
+* Fix `config.h` generation for example builds (#60)
+* Fix nondeterministic power budget: uninitialised `structure_power_loss` produced run-to-run NaN/denormal RADIATED POWER and EFFICIENCY values
+* Fix structure loss reported as zero when current printing is disabled (`PT -1`): ohmic loss is now computed independent of the print flag, matching NEC-2 (loaded models with suppressed printing reported false 100% efficiency)
+
+### Distribution
+* Eigen 3.4.0 headers bundled in `src/eigen3/` — no external Eigen dependency needed
+* Updated README.md and INSTALL.md for v2.0.0 (removed LAPACK/BLAS references)
+* Added macOS/Xcode build instructions to INSTALL.md
+* Updated example Makefile for bundled Eigen, no LAPACK
+
+### Tests
+* 12×12 complex factrs/solves pipeline test
+* LU decomposition solve-verify test (Eigen path)
+* Intersection check bypass test (#63)
+* Helix validation test (#48)
+* All 42 test cases pass (405 assertions)
+
+*Numerical output verified identical between Eigen v2.0.0 and pre-Eigen v1.7.7 builds.*
+
+### Code Quality
+* Fixed exception memory leak: throw-by-pointer → throw-by-value (55+ sites, 15 files)
+* Split 4 monolithic functions: netwk() 680→13, reflect() 391→30, connect_segments() 380→16, etmns() 331→55 (#107)
+* Fix ind1/ind2 copy-paste bug in nefld() and qdsrc() — corrupted EK params for connected segments
+* Fix current_vector overallocation: n+4*m → n+3*m (matches FORTRAN CUR(3*MAXSEG))
+* Fix patch-only geometry guard: np==0 → m==0 (np is unknowns, m is patch count)
+* Add 3 patch test cases: patch_plate, wire_over_patch, patch_near_field
+* Fix #109: wrong e-vector index for EX type-4 current source (n+3*patch → n+2*patch)
+* Fix efld() parameter name conflict: header used on_source_segment, implementation used not_on_source_segment
+* pragma once on all 26 headers (removes reserved-identifier UB)
+* 22 C-style casts converted to static_cast
+* 12 override specifiers added to virtual functions
+* 14 blocks of dead code removed
+* Raw new/delete replaced with std::unique_ptr (3 sites)
+* Table-driven NEC card parser with clean parse_nec_card()
+* Refactor efld(): extract efld_compute() to eliminate ~140 lines of near-duplicate direct/reflected field computation
+* Refactor excitation_loop(): decompose ~200-line do-while(true) monolith into excitation_process_inner(),
+  excitation_compute_near_field(), and excitation_compute_far_field() helpers
+* Refactor parse_geometry(): 370-line do-while dispatcher split into per-card handlers (GW/GX/GR/GS/GM/SP/SM/GA/SC/GH) sharing a geometry_parse_state struct
+* Move structure power loss to nec_context::compute_structure_power_loss(); remove dead nload member from nec_structure_currents
+* Expand nec_card f[] array from 6 to 7 floats for additional RP card field support
+* CI workflow: simple Makefile build, 405 unit tests, smoke test
+
+## Version 1.7.7
+
+* Add `set_intersection_check(bool)` API to c_geometry allowing users to bypass
+  the O(n²) segment intersection check — useful for closely-spaced parallel wires
+  (e.g., phasing stubs, boom models) that trigger false positives (#63).
+* Fix helix validation: calling `helix()` with `segment_count < 1` now throws a
+  descriptive `nec_exception` instead of silently returning with no wires (#48).
+* Switch LAPACK support from Atlas-specific `clapack` to standard `lapacke.h`
+  bindings. LAPACK is now enabled via `./configure --with-lapack` (#75).
+* Fix pkg-config: `necpp.pc` no longer hardcodes `-llapack -lblas` when LAPACK
+  is disabled (#76).
+* Fix typos in K5332187.nec test data: erroneous apostrophe before PL card and
+  "Richtanzenne" → "Richtantenne" (#77).
+* Add comprehensive 12×12 complex matrix factor+ solve test (factrs/solves)
+  validating the full linear algebra pipeline: transpose handling, LU decomposition,
+  partial pivoting, and forward/back substitution with complex arithmetic.
+* Add Eigen LU decomposition support via `./configure --with-eigen-lu`:
+  rewrites broken `lu_decompose_eigen()` using `Eigen::Map` + `PartialPivLU`
+  with zero-copy in-place factorization, storing results in NEC-compatible format.
+* Prepare 3-vector for Eigen (`./configure --with-eigenv`): changed all `.x()`/`.y()`/`.z()`
+  calls to `operator()(0)`/`(1)`/`(2)`, added `squaredNorm()` and `cross()` aliases
+  for Eigen API compatibility. Fixed missing `#include <vector>` in `nec_wire.h`.
+
+## Version 1.7.6
+
+* Fix bug in nec_ground::get_radial_wire_length() which returned radial_wire_count instead
+  of radial_wire_length.
+* Fix dangling pointer bug in ASSERT macro (nec_debug.h) — the thrown c_str() pointer
+  referred to a destroyed temporary std::string. Now throws std::string by value.
+  Also changed std::stringstream to std::ostringstream in the ASSERT macro.
+* Remove `using namespace std;` from nec2cpp.h header file.
+* Fix multi-frequency plane wave excitation: excitation_loop() returned
+  FREQ_PRINT_NORMALIZATION after completing the incidence angle loop, which caused
+  simulate() to execute `nfrq=1; mhz=1;` — killing the frequency loop after the first
+  frequency. Now returns FREQ_LOOP_CONTINUE when more frequencies remain, matching
+  the pattern used for voltage/current excitation.
+* Fix error in Sommerfeld ground interpolation thanks to Alexander Schewelew
+* Update checking for blas, so that other blas can be used like openblas.
+* Optimize safe_array::resize() to use geometric growth (doubling) instead of
+  linear (+_resize_chunk), reducing repeated incremental resizes from O(n²) to
+  O(n log n) total copy cost.
+* Refactor c_ggrid::interpolate(): replace static locals with per-instance cache
+  members (enables thread safety and correct multi-instance behavior); hoist the
+  switch(grid) out of the inner coefficient-computation loop; factor duplicated
+  cubic interpolation code into a single lambda used for all 4 functions.
+* Fix safe_array 2D bounds-check test failure: BoundsViol was guarded by
+  #ifdef NEC_ERROR_CHECK, causing an ODR violation when translation units
+  compiled with different macro settings were linked together. Moved
+  BoundsViol definition outside the #ifdef so the exception type always exists.
+
+## Vresion 1.7.4
+* Fix bug in reading comments longer than 80 characters (issue #47)
+* Fixed bug in nec_context::fblock when setting up symmetry_array matrix for plane symmetry.
+* Many changes to the 64-bit integer support for large matrices.
+
+## Version 1.7.3
+* Changes to allow compilation on CLANG. Change to use std::abs() and friends.
+* Minor bug fixes in example c code.
+* Minor bug in fallthrough on printing complex numbers.
+
+## Version 1.7.2
+* Fixed bug in helix introduced in 1.7.1 - had not updated all calls to the helix function (thanks to Yoshi Takeyasu for pointing this out)
+
+## Version 1.7.1
+* Changed API of c_geometry::helix() to put the tag id and segment count at the start.
+
+## Version 1.7.0
+* Added new functions for nec_get_gain() to get the radiation pattern elements.
+* added nec_medium_parameters to the C-style API. The user can now alter the permittivity and permeability of the environment via the API.
+* Added accessor methods to the radiation pattern to get all the theta and phi angles
+* Added 2D matrix for radiation pattern gain_. Much easier to plot radiation patterns.
+* nec_geometry_complete() now takes only one parameter. The second parameter was unused.
+* New c_geometry->reflect and c_geometry->generate_cylindrical_structure(int itx, int nop) helper functions to generate symmetric structures.
+* New c_ground methods for finding out the ground parameters
+* Split the ground enviroment computation from the output code. 
+* Fix make dependencies to allow parallel make
+* Allow building with gcc 5.1
+
+## Version 1.6.2 [April 2015]
+* Added new functions for nec_excitation_voltage, nec_excitation_current and nec_excitation_planewave to simplfy C-style API calls
+* More documentation
+* Published python-necpp as a separate project.
+
+## Version 1.6.1 [March 29 2015]
+* Added python library for the c-stye API.
+* Fixed bug.  "SP" with multiple "SC" doesn't work #10.
+* Yoshi Takeyasu. Change instances of int to int64_t, to allow simulations up to 140 GB.
+* Bugfix in c_geometry::cmss
+* C-style library now supports error messages. This changes the public API.
+* Added missing library function nec_kh_card(). 
+* Cleaned up bitrot in example code.
+* Added C-style support for patch command. nec_patch.
+* Added C-style support for GM card (move command). nec_gm_card.
+* Added python based testharness
+* Start to use matrix operations for multi-dimensional arrays. safe_matrix class.
+* Errors are thrown if zeros are specified for ground conductivity and dielectric constant.
+* Added Reflection nec_gx_card to C-style interface.
+* Added Reflection gx_card to c_geometry class.
+* Catch out of memory errors and create nice error messages
+* Fix memory allocation errors in patch simulations.
+
+## Version 1.5.4 [December 2014]
+* Changed default compiler options to remove debugging symbols
+* Fixed bug printing maximum gain on the command line.
+* Remove vector test code from main loop 
+* Renamed the c_geometry->n to n_segments
+
+## Version 1.5.3 [October 2014]
+* Compatability with gcc4.9
+* Compatability with gcc4.9
+* Improved ANTLR parser.
+* Updated PyNEC directory to use numpy instead of numarray. Fixed wrap/*.cpp files [Thanks to James David]
+* Moved to using Makefile.git, and updated configure.in to configure.ac
+* Include the necpp headers in both CFLAGS and CPPFLAGS
+
+## Version 1.5.2 [May 2013]
+* Changed the autoconf system to allow building with the eigen3 package
+* Added a genetic optimzer written in Ruby
+
+## Version 1.5.1 [March 2012]
+* Improved error messages on intersection. Now reports tag_id as well as wire number.
+* Moved source to github
+* Added automatic build date (removed their manual definition in common.h)
+* New code directory structure. More logical, all testharness files moved to the testharness directory.
+
+## Version 1.5 - 2010-10-02
+* Added a test for segment midpoint intersections. If two wires are joined at acute angles to each other, this
+  can lead to inaccurate simulations. If either the first or last segment midpoint of a wire lies inside any other wire
+  an exception is thrown with a message.
+* Better exception handling in the Ruby binding. Exception's now have their messages passed through.
+* Improved preporting of power gain. This means that hopefully (not quite fully tested) the gain
+  normalization does not any longer have any effect on the get_maximum_gain functions e.t.c.
+* Modified to work with atlas 3.8
+* Fixed up the benchmark to avoid wires at a very acute angles (violating the midpoint intersection test)
+
+## Version 1.4 - 2009-01-02
+* Added accessor functions for radiation pattern statistics.
+* Renamed some methods
+* Added Ruby Wrapper to the C library
+* Added code to detect wire intersections and throw an exception.
+* Renamed some methods in the C library interface. This makes a more logical grouping when 
+  getting statistics from radiation patterns.
+* Added Ruby Wrapper to the C library libnecpp. This code is in the directory Ruby.
+
+## Version 1.3
+* Using the correct value for speed of light throughout (was using 299.8 as default freq, and this caused slight 
+  problems. Now using 1 meter as default wavelength (rather than 299.8 as the default frequency)
+* Added error message when segment length is less that 0.01 wavelengths long.
+* Added accessor functions for RHCP and LHCP receiving gain to nec_radiation_pattern
+	nec_float get_power_gain_tot(int theta_index, int phi_index) const
+	nec_float get_power_gain_rhcp(int theta_index, int phi_index) const
+	nec_float get_power_gain_lhcp(int theta_index, int phi_index) const
+* Changes geometry parsing to make ix,iy,iz local variables. Set iy=0 before calling reflect for GR card.
+
+## Version 1.2.9
+* Improvements to the LAPACK use. Autoconf now checks for the correct functions.
+
+## Version 1.2.8
+* We NOW are using LAPACK. Huge speed bonus. Run configure with the option --with-lapack to compile this in. You will need to install some LAPACK libraries. Some work needed in the autoconf files (configure.in) to make this work correctly on more platforms. On debian use
+	aptitude install libatlas-base-dev
+
+## Version 1.2.7
+* Some work on using ATLAS for the Gaussian Elimination.
+* cleaned up some code that produced warnings in gcc 4.2 (const char coercions)  
+
+## Version 1.2.6
+* Added output flag for XML -x
+* Cleaned up output file handling in nec_results (a little)
+
+## Version 1.2.5
+
+* Fixed a bug in handling of patches. Thanks to the hard work of Neoklis and Jerry Burke (original author),  this has been sorted out. It is tested with neokliks_bug.nec (in test data) and caused a segmentation fault in all versions, C, C++ and FORTRAN.
+* Some code has been added for handling arbitrary media - permittivity and permeability. A new card has been added as well.
+
+## Version 1.2.4
+
+* (Remi Sassolas) Major Progress in the Python Port
+* (Remi Sassolas) Fixed crashing bug in structure current printing. This bug would happen when someone absent-minded (or just silly) would ask the currents to be printed using the output format designed for a receiving pattern, but wouldn't use an incident plane wave as the excitation type. Then NEC-2 would crash (segmentation fault)
+* (Remi Sassolas) New Results object for handling structure currents.
+
+
+## Version 1.2.3
+
+* Added new test case (pjw_small.nec) that appears to fail on the radiation pattern result when compared to original FORTRAN. This was caused by an error in the original FORTRAN parser. Decided to do better and use a proper LL(k) parser generator.
+* Added ANTLR grammar (see http://www.antlr.org) that generates a parser for nec files. This was motivated by a silent failure the caused the wrong result to be printed. For the moment this development is separate (inside the antlr directory). However by version 1.3 we will be using an ANTLR grammar.
+* Moved lots of code from header files into .cpp files. This makes the libnecpp more usable as a C++ shared library.
+* Added a new method 'calculate_network_data()' to the nec_context class. This separates out the calculations from the print_network_data() method. This code is still ugly but should be functional.
+* Moved development to alioth.debian.org to support the python programming effort.
+* src/PowerBudget.h: Allow for blank line following POWER INPUT to cope with FORTRAN output
+* src/nec2cpp.cpp: Check number of parameters in the TL card and return an error if not all parameters are supplied. This resolves an ambiguity when blank parameters are present (we can't test for these).
+* src/nec_radiation_pattern.h: Added accessor functions to the nec_radiation_pattern results class.
+* Added an example file "example/test_nec.cpp" to show how to use a results object from a C++ program.
+
+## Version 1.2.2
+
+* Trap condition where n<=1 in c_geometry::connect_segments pending finding where the bug is. The array icon1 does not have its values initialized under these circumstances and bad things happen (walk all over memory).
+* Cleaned up the connect_segments code in c_geometry.h. Moved many variable declarations into local contexts.
+* Added L1-norm and Euclidian norm to the nec_3vector class (use it in c_geometry::connect_segments)
+* Clean up local variables in nec_context::nhfld()
+* Clean up local variables in nec_context::pcint()
+* Fixed conversion of int to bool when calling nec_context::efld(). Removed unnecessary ij variable.
+
+## Version 1.2.1
+
+* Make ksymp a private member of nec_ground. Replaced it with a boolean accessor method present() that indicates whether the ground is present. Then removed some ugly code in nec_context::efld().
+* Switched on all warnings I can think of (more than -Wall) in the debug build. This found a lot of shadowed variables.
+* Removed shadowed variables in c_geometry.
+* Switched normalized receiving pattern output to use the results object.
+	
+	
+## Version 1.2
+
+* Cleaned up:
+	degree to radian conversion. Speedup.
+	Radiation Pattern Code. Easier to read (plenty of work left)
+* New Results API allows easy access to simulation results, currently includes the following output
+	* Antenna Input parameters
+	* Normalized Receiving Pattern
+	* Radiation Pattern
+	* Structure excitation
+* Note: The new radiation pattern output will generate phases of complex numbers that are between -180 and +180. For example -195 will appear as +165 degrees. 
+* Enabled the writing of some data to standard output (-s command line option)
+* NEW: Data can be written in comma-separated-value format for easy importing into other plotting programmes.
+* Fixed bug in printing STRUCTURE EXCITATION data (the segment number was incorrect)
+* Testharness fixes
+* Faster benchmark code (similar output values) This is because we are using some dynamic benchmarking of clients in a heterogenous multiprocessing systemm.
+
+
+## Version 1.1.4
+
+* Removed the inclusion of c_geometry.h from nec_context.h. This got rid of some unnecessary dependencies. Also changed nec_context to point to a geometry object (rather than own it).
+* Added classes for representation of geometry -- to construct XML geometry descriptions.
+* Added enum for excitation type
+* New nec_3vector class to simplify vast amounts of code.
+* Fixed bug in current excitation (inside etmns). Bug exists also in nec2c. This occurs if the excitation type (excite_type) parameter is EXCITATION_CURRENT.
+* Changed the parameters of the rp_card function to explicitly take the XNDA parameters as separate integers. This avoids 0500 being passed in as an octal number!
+* Code cleanup in c_geometry::tbf()
+
+## Version 1.1.3
+
+* Slight changes to benchmarking output.
+* Notes on compilation
+
+## Version 1.1.2
+
+* New header files for the libnecpp.h.
+* Moved to libtool for library generation.
+* Minor code cleanup in c_evlcom (variable renaming and commenting)
+* Added endl() to version.
+
+
+## Version 1.1.1
+
+21 January 2005.
+
+* Cleaned up and reworked patch subdivision.
+* Fixed a bug in interpolate() caused by not having the precalculated data static. Thanks to Neokolis for pointing this out.
+* Cleaned up rom2() and rechecked program flow.
+
+
+## Version 1.1.0
+
+20 January 2005.
+
+* Got LAPACK going. There is generally a 100% speedup. However the LAPACK routines sometimes
+produce different answers to the built in LU decomposition routine? Therefore LAPACK LU decompositions is still not included in the default build.
+* Fixed up a re-initialization problem in the temporary geometry files.
+* Several Improved testharness code.
+* Moved temporary geometry into the geometry class. Set this up in the geometry_complete() method.
+* Added #include <unistd.h> to misc.cpp
+* Ignore Radiation Pattern Polarization angles in the testharness where the power level is -999 dB. These have no physical meaning and are often different with LAPACK.
+
+## Version 1.0.8
+
+December 2004.
+
+* Clean up of nec_context member variables s,b. Renamed m_s, and m_b
+* Added member function to c_geometry for testing whenther we should be using a thin wire approximation or not.
+* Fix problem introduced in the Sommerfeld-Norton ground condition, added more testharness stuff.
+
+## Version 1.0.7
+
+December 2004.
+
+* Switched command-line option parsing to XGetopt for cross platform compatibility
+* Fixed major bug in Win32 executable that caused a crash on file output. Added Visual Studio Project files
+* Changed member 'near' of nec_context to m_near to avoid a conflict with the VC++ reserved word 'near'
+* Modified the error message macro to allow compilation on Visual C++. This causes error messages to NOT have a content
+if nec2++ is compiled with a non-C99 standard compiler.
+
+## Version 1.0.6
+December 2004.
+
+* Fix for non-initialization of voltage sources if no excitations were specified (Thanks to Jerome Plet)
+* Cleaned up code for bad loop in nec_context (Thanks to Neoklis Kyriazis for this)
+* Removed old Numerical Greens Functions code and variables -- these were not doing anything (ib11 e.t.c.)
+* All system exit (stop()) calls have been removed and replaced by exceptions (apart from those inside the main command line programme)
+
+
+## Version 1.0.5 
+December 2004.
+
+* Fix for not clearing temporary geometry correctly.
+* Moved more stop(-1) commands to throwing nec_exceptions.
+* Improved Doxygen Comments
+* Added arc and helix commands to the nec_context object.
+
+
+## Version 1.0.4 
+November 2004.
+
+This version includes significant changes. nec2++ can now be called from a C API, although I am still figuring out how
+to remove the requirement for linking to the standard C++ library! Help would be appreciated here. See the examples
+directory in the source tree.
+
+This version has also moved to KDevelop and autoconf as the primary development environment. This means that nec2++
+can be build using the industry standard './configure', 'make' and 'make install' commands.
+
+Please note that my aim is to NOT require KDevelop to build this project, but rather I am using it here. I might
+well have missed something when creating the source distribution. If I have, please let me know.

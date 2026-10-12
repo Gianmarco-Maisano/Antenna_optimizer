@@ -1,0 +1,10 @@
+CE A simple structure excited by a plane wave, and at multiple frequencies.
+GW 0 36 0 0 0 -0.042 0.008 0.017 0.001
+GE 0
+GN -1
+LD 5 0 0 0 3.720E+07 
+FR 0 10 0 0 2400.0 10.0
+PT -1
+EX 1 0 1 0 0 0 0 0 0 0 0
+RP 0 1 1 0500 90 90 0 0
+EN

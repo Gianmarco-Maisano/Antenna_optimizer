@@ -1,0 +1,79 @@
+# Compiled source #
+###################
+*.com
+*.class
+*.dll
+*.exe
+*.so
+*.o
+*.a
+*.la
+*.trs
+/nec2++
+/nec2diff
+# CMake add_subdirectory(src) emits the CLI binaries into src/ for in-source
+# builds. Out-of-source builds land under build/ (ignored above). Match both
+# spots so neither tree shows stray binaries in git status.
+/src/nec2++
+/src/nec2diff
+nec2pp.js
+nec2pp.wasm
+# Legacy test binary name (pre-CMake era); kept ignored in case of stale trees.
+src/necpp_test
+src/test_manager
+
+# CMake build artifacts #
+#########################
+build/
+build-*/
+build-wasm/
+build-wasm-test/
+CMakeFiles/
+cmake_install.cmake
+CMakeCache.txt
+CMakeError.log
+CMakeOutput.log
+install_manifest.txt
+_CPack_Packages/
+# CMake-generated build-system files inside source dirs (e.g. src/Makefile
+# produced by `cmake -B src`). Keep hand-written Makefiles in antlr/,
+# testharness/, example/ — they are not generated.
+src/Makefile
+
+
+# ANTLR generated artifacts (built in Docker) #
+###############################################
+antlr/generated/
+antlr/nec_parse
+antlr/build/
+
+# Packages #
+############
+# it's better to unpack these files and commit the raw source
+# git has its own built in compression methods
+*.7z
+*.dmg
+*.gz
+*.iso
+*.jar
+*.rar
+*.tar
+*.zip
+*.deb
+*.rpm
+
+# Logs and databases #
+######################
+*.log
+*.sql
+*.sqlite
+
+# OS generated files #
+######################
+.DS_Store*
+*~
+*.outc
+*.outcpp
+*.outf
+*.swp
+*.diff

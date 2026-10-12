@@ -11,28 +11,34 @@ CONFIG_PATH = os.path.abspath(CONFIG_PATH)
 config = configparser.ConfigParser()
 config.read(CONFIG_PATH)
 
-EXE_DIR = os.path.join(BASE_DIR, config['Paths']['exe_dir'])
 OUT_DIR = os.path.join(BASE_DIR, config['Paths']['output_dir'])
 INP_DIR = os.path.join(BASE_DIR, config['Paths']['input_dir'])
-EXE_FILE = config['Paths']['exe_file']
-TMP_FILE = config['Paths']['tmp_file']
+NECPP_BINARY = os.path.join(BASE_DIR, 'third_party', 'necpp', 'build', 'src', 'nec2++')
+BUILD_SCRIPT = os.path.join(BASE_DIR, 'build_necpp.sh')
 frequency = float(config['Simulation']['frequency'])
 
 
+def run_necpp(input_file, output_file):
+    if not os.path.isfile(NECPP_BINARY):
+        subprocess.run(['sh', BUILD_SCRIPT], check=True, cwd=BASE_DIR)
 
-def run_nec2dxs1k5():
-    tmp_path = os.path.abspath(os.path.join(BASE_DIR, TMP_FILE))
-    command = f"Set-Location '{EXE_DIR}'; Get-Content '{tmp_path}' | & .\\{EXE_FILE}"
     process = subprocess.run(
-        ["powershell", "-Command", command],
+        [NECPP_BINARY, '-i', os.path.abspath(input_file), '-o', os.path.abspath(output_file)],
+        cwd=BASE_DIR,
         capture_output=True,
         text=True
     )
 
-    return process.stdout, process.stderr
+    error = '' if process.returncode == 0 else process.stderr or process.stdout
+    return process.stdout, error
 
 
 def read_nec_output(output_file):
+    result = read_nec_results(output_file)
+    return result['real_impedance'], result['imag_impedance'], result['max_gain_db']
+
+
+def read_nec_results(output_file):
     with open(output_file, "r") as file:
         lines = file.readlines()
 
@@ -42,19 +48,21 @@ def read_nec_output(output_file):
 
     inside_impedance_section = False
     inside_radiation_section = False
+    radiation_pattern = []
+    number_pattern = re.compile(r'[-+]?(?:\d+\.?\d*|\.\d+)(?:[Ee][-+]?\d+)?')
 
     for line in lines:
-        if "IMPEDANCE (OHMS)" in line:
+        if "IMPEDANCE (OHMS)" in line or "ANTENNA INPUT PARAMETERS" in line:
             inside_impedance_section = True
             continue
 
-        if "- - - RADIATION PATTERNS - - -" in line:
+        if "RADIATION PATTERNS" in line:
             inside_radiation_section = True
             continue
 
         if inside_impedance_section:
             if re.match(r'^\s*\d+\s+\d+', line):
-                separated_values = re.findall(r'[-+]?\d*\.\d+E[-+]?\d+|[-+]?\d+\.\d+|[-+]?\d+', line)
+                separated_values = number_pattern.findall(line)
                 if len(separated_values) >= 8:
                     try:
                         real_impedance = float(separated_values[6])
@@ -64,18 +72,31 @@ def read_nec_output(output_file):
                 inside_impedance_section = False
 
         if inside_radiation_section:
-            match = re.search(r"\s+[-+]?\d+\.\d+\s+[-+]?\d+\.\d+\s+[-+]?\d+\.\d+\s+([-+]?\d+\.\d+)\s+[-+]?\d+\.\d+", line)
-            if match:
-                total_gain = float(match.group(1))
-                if total_gain > max_gain_db:
+            if line.lstrip().startswith('*****') or 'TOTAL RUN TIME' in line:
+                inside_radiation_section = False
+                continue
+            separated_values = number_pattern.findall(line)
+            if len(separated_values) >= 5:
+                try:
+                    theta = float(separated_values[0])
+                    phi = float(separated_values[1])
+                    total_gain = float(separated_values[4])
+                except ValueError:
+                    continue
+                radiation_pattern.append({
+                    'theta_deg': theta,
+                    'phi_deg': phi,
+                    'total_gain_dbi': total_gain,
+                })
+                if 0.0 <= phi <= 180.0 and total_gain > max_gain_db:
                     max_gain_db = total_gain
 
-    return real_impedance, imag_impedance, max_gain_db
-
-def write_tmp_file(tmp_path, nec_input_path, nec_output_path):
-    with open(tmp_path, 'w') as file:
-        file.write(f"{nec_input_path} \n")
-        file.write(f"{nec_output_path}\n")
+    return {
+        'real_impedance': real_impedance,
+        'imag_impedance': imag_impedance,
+        'max_gain_db': max_gain_db,
+        'radiation_pattern': radiation_pattern,
+    }
 
 def convert_to_nec(individuo):
     lunghezze = individuo['lunghezze']

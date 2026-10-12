@@ -45,9 +45,11 @@ def main():
         inp_file_path = os.path.join(INP_DIR, main_input_file.replace('.nec', '.inp'))
         convert_nec_to_inp(nec_file_path, inp_file_path, k)
 
-        stdout, stderr = run_nec2dxs1k5()
-
         out_file_path = os.path.join(OUT_DIR, main_output_file)
+        stdout, stderr = run_necpp(inp_file_path, out_file_path)
+        if stderr:
+            continue
+
         real_imp, imag_imp, max_gain = read_nec_output(out_file_path)
 
         results.append({
